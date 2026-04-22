@@ -2,9 +2,10 @@ import os
 import datetime
 import jwt
 import bcrypt
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr, Field
-from database import get_supabase
+from database import get_supabase, get_supabase_admin
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,6 +18,7 @@ ALGORITHM = "HS256"
 class UserAuth(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6)
+    full_name: Optional[str] = None
 
 def hash_password(password: str):
     # Hash a password using bcrypt
@@ -62,6 +64,16 @@ async def signup(user: UserAuth):
         
         if not response.data:
             raise HTTPException(status_code=400, detail="Failed to create user")
+        
+        user_id = response.data[0]["id"]
+        
+        # 4. Create initial profile entry
+        if user.full_name:
+            admin_supabase = get_supabase_admin()
+            admin_supabase.table("profiles").insert({
+                "id": user_id,
+                "full_name": user.full_name
+            }).execute()
             
         return {"message": "User created successfully", "user": {"email": user.email}}
     except Exception as e:
