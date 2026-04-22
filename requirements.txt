@@ -9,3 +9,4 @@ PyJWT
 alembic
 sqlalchemy
 psycopg2-binary
+python-multipart
