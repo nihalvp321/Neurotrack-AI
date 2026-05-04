@@ -17,10 +17,5 @@ PyJWT
 python-multipart
 email-validator
 websockets==15.0.1
-tensorflow
 opencv-python
-matplotlib
 Pillow
-seaborn
-
-
