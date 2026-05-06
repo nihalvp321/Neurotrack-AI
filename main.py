@@ -15,14 +15,76 @@ from gait_analysis import extract_gait_features
 
 app = FastAPI(title="Neurotrack AI API")
 
-# Load the trained voice model (Pipeline contains both scaler and SVM)
-VOICE_MODEL_PATH = os.path.join(os.path.dirname(__file__), "neurotrack-ml", "models", "voice model", "voice_model.pkl")
-try:
-    voice_model = joblib.load(VOICE_MODEL_PATH)
-    print(f"--- Voice Model Loaded from {VOICE_MODEL_PATH} ---")
-except Exception as e:
-    print(f"--- Failed to load Voice Model: {e} ---")
-    voice_model = None
+# ── LAZY MODEL LOADING ────────────────────────────────────
+# We load models only when needed to save RAM on Render (Free tier limit: 512MB)
+
+voice_model = None
+def get_voice_model():
+    global voice_model
+    if voice_model is None:
+        VOICE_MODEL_PATH = os.path.join(os.path.dirname(__file__), "neurotrack-ml", "models", "voice model", "voice_model.pkl")
+        try:
+            voice_model = joblib.load(VOICE_MODEL_PATH)
+            print(f"--- Voice Model Loaded ---")
+        except Exception as e:
+            print(f"--- Failed to load Voice Model: {e} ---")
+    return voice_model
+
+spiral_scaler = None
+spiral_pca = None
+spiral_svm = None
+def get_spiral_model():
+    global spiral_scaler, spiral_pca, spiral_svm
+    if any(m is None for m in [spiral_scaler, spiral_pca, spiral_svm]):
+        SPIRAL_MODEL_DIR = os.path.join(os.path.dirname(__file__), "neurotrack-ml", "models", "spiral model")
+        try:
+            spiral_scaler = joblib.load(os.path.join(SPIRAL_MODEL_DIR, "spiral_scaler.pkl"))
+            spiral_pca = joblib.load(os.path.join(SPIRAL_MODEL_DIR, "spiral_pca.pkl"))
+            spiral_svm = joblib.load(os.path.join(SPIRAL_MODEL_DIR, "spiral_svm_model.pkl"))
+            print(f"--- Spiral Model Loaded ---")
+        except Exception as e:
+            print(f"--- Failed to load Spiral Model: {e} ---")
+    return spiral_scaler, spiral_pca, spiral_svm
+
+tremor_model = None
+tremor_feature_names = None
+def get_tremor_model():
+    global tremor_model, tremor_feature_names
+    if tremor_model is None:
+        TREMOR_MODEL_DIR = os.path.join(os.path.dirname(__file__), "neurotrack-ml", "models", "tremor_model")
+        try:
+            tremor_model = joblib.load(os.path.join(TREMOR_MODEL_DIR, "tremor_classifier.pkl"))
+            tremor_feature_names = joblib.load(os.path.join(TREMOR_MODEL_DIR, "tremor_feature_names.pkl"))
+            print(f"--- Tremor Model Loaded ---")
+        except Exception as e:
+            print(f"--- Failed to load Tremor Model: {e} ---")
+    return tremor_model, tremor_feature_names
+
+gait_model = None
+gait_feature_names = None
+def get_gait_model():
+    global gait_model, gait_feature_names
+    if gait_model is None:
+        GAIT_MODEL_DIR = os.path.join(os.path.dirname(__file__), "neurotrack-ml", "models", "gait_model")
+        try:
+            gait_model = joblib.load(os.path.join(GAIT_MODEL_DIR, "gait_model.pkl"))
+            gait_feature_names = joblib.load(os.path.join(GAIT_MODEL_DIR, "gait_feature_names.pkl"))
+            print(f"--- Gait Model Loaded ---")
+        except Exception as e:
+            print(f"--- Failed to load Gait Model: {e} ---")
+    return gait_model, gait_feature_names
+
+ensemble_model = None
+def get_ensemble_model():
+    global ensemble_model
+    if ensemble_model is None:
+        ENSEMBLE_MODEL_PATH = os.path.join(os.path.dirname(__file__), "neurotrack-ml", "models", "ensemble", "ensemble_model.pkl")
+        try:
+            ensemble_model = joblib.load(ENSEMBLE_MODEL_PATH)
+            print(f"--- Ensemble Meta-Model Loaded ---")
+        except Exception as e:
+            print(f"--- Failed to load Ensemble Model: {e} ---")
+    return ensemble_model
 
 VOICE_FEATURE_NAMES = [
     'MDVP:Fo(Hz)', 'MDVP:Fhi(Hz)', 'MDVP:Flo(Hz)', 'MDVP:Jitter(%)',
@@ -30,50 +92,6 @@ VOICE_FEATURE_NAMES = [
     'MDVP:Shimmer(dB)', 'Shimmer:APQ3', 'Shimmer:APQ5', 'MDVP:APQ', 'Shimmer:DDA',
     'NHR', 'HNR', 'RPDE', 'DFA', 'spread1', 'spread2', 'D2', 'PPE'
 ]
-
-# Load the trained spiral model components
-SPIRAL_MODEL_DIR = os.path.join(os.path.dirname(__file__), "neurotrack-ml", "models", "spiral model")
-try:
-    spiral_scaler = joblib.load(os.path.join(SPIRAL_MODEL_DIR, "spiral_scaler.pkl"))
-    spiral_pca = joblib.load(os.path.join(SPIRAL_MODEL_DIR, "spiral_pca.pkl"))
-    spiral_svm = joblib.load(os.path.join(SPIRAL_MODEL_DIR, "spiral_svm_model.pkl"))
-    print(f"--- Spiral Model (Scaler, PCA, SVM) Loaded from {SPIRAL_MODEL_DIR} ---")
-except Exception as e:
-    print(f"--- Failed to load Spiral Model: {e} ---")
-    spiral_scaler = None
-    spiral_pca = None
-    spiral_svm = None
-
-# Load the trained tremor model
-TREMOR_MODEL_DIR = os.path.join(os.path.dirname(__file__), "neurotrack-ml", "models", "tremor_model")
-try:
-    tremor_model = joblib.load(os.path.join(TREMOR_MODEL_DIR, "tremor_classifier.pkl"))
-    tremor_feature_names = joblib.load(os.path.join(TREMOR_MODEL_DIR, "tremor_feature_names.pkl"))
-    print(f"--- Tremor Model & Features Loaded from {TREMOR_MODEL_DIR} ---")
-except Exception as e:
-    print(f"--- Failed to load Tremor Model: {e} ---")
-    tremor_model = None
-    tremor_feature_names = None
-
-# Load the trained gait model
-GAIT_MODEL_DIR = os.path.join(os.path.dirname(__file__), "neurotrack-ml", "models", "gait_model")
-try:
-    gait_model = joblib.load(os.path.join(GAIT_MODEL_DIR, "gait_model.pkl"))
-    gait_feature_names = joblib.load(os.path.join(GAIT_MODEL_DIR, "gait_feature_names.pkl"))
-    print(f"--- Gait Model & Features Loaded from {GAIT_MODEL_DIR} ---")
-except Exception as e:
-    print(f"--- Failed to load Gait Model: {e} ---")
-    gait_model = None
-    gait_feature_names = None
-
-# Load the trained ensemble meta-model
-ENSEMBLE_MODEL_PATH = os.path.join(os.path.dirname(__file__), "neurotrack-ml", "models", "ensemble", "ensemble_model.pkl")
-try:
-    ensemble_model = joblib.load(ENSEMBLE_MODEL_PATH)
-    print(f"--- Ensemble Meta-Model Loaded from {ENSEMBLE_MODEL_PATH} ---")
-except Exception as e:
-    print(f"--- Failed to load Ensemble Model: {e} ---")
-    ensemble_model = None
 
 # ── SCORING & CALIBRATION HELPERS ─────────────────────────
 def calibrate_score(prob, power=2.1, threshold=0.92):
@@ -127,7 +145,8 @@ app.include_router(auth.router)
 
 @app.post("/predict/voice")
 async def predict_voice(email: str, file: UploadFile = File(...)):
-    if voice_model is None:
+    model = get_voice_model()
+    if model is None:
         raise HTTPException(status_code=500, detail="Voice model not loaded on server")
 
     # 1. Save temp file to analyze
@@ -146,7 +165,7 @@ async def predict_voice(email: str, file: UploadFile = File(...)):
         features_df = pd.DataFrame([features], columns=VOICE_FEATURE_NAMES)
         
         # Get probability (probability=True was set in SVC)
-        prob = voice_model.predict_proba(features_df)[0][1]
+        prob = model.predict_proba(features_df)[0][1]
         
         # --- NOISE & QUALITY PENALTY ---
         # HNR (Harmonic-to-Noise Ratio) is at index 15. 
@@ -199,7 +218,8 @@ async def predict_voice(email: str, file: UploadFile = File(...)):
 
 @app.post("/predict/spiral")
 async def predict_spiral(email: str, file: UploadFile = File(...)):
-    if any(m is None for m in [spiral_scaler, spiral_pca, spiral_svm]):
+    scaler, pca, svm = get_spiral_model()
+    if any(m is None for m in [scaler, pca, svm]):
         raise HTTPException(status_code=500, detail="Spiral model components (scaler/pca/svm) not loaded on server")
 
     # 1. Save temp file to analyze
@@ -218,11 +238,11 @@ async def predict_spiral(email: str, file: UploadFile = File(...)):
         features_2d = features.reshape(1, -1)
         
         # Apply the exact same transformation as training
-        scaled_features = spiral_scaler.transform(features_2d)
-        pca_features = spiral_pca.transform(scaled_features)
+        scaled_features = scaler.transform(features_2d)
+        pca_features = pca.transform(scaled_features)
         
         # Get probability
-        prob = spiral_svm.predict_proba(pca_features)[0][1]
+        prob = svm.predict_proba(pca_features)[0][1]
         
         # --- DIGITAL JERK & CONTINUITY PENALTY ---
         # Features: Index 14 = num_contours, Index 11 = solidity
@@ -285,7 +305,8 @@ class TremorData(BaseModel):
 
 @app.post("/predict/tremor")
 async def predict_tremor(data: TremorData):
-    if tremor_model is None or tremor_feature_names is None:
+    model, feature_names = get_tremor_model()
+    if model is None or feature_names is None:
         raise HTTPException(status_code=500, detail="Tremor model not loaded on server")
     
     try:
@@ -319,8 +340,8 @@ async def predict_tremor(data: TremorData):
         features_df = pd.DataFrame([features], columns=tremor_feature_names)
         
         # Use .values to avoid UserWarning about feature names if the scaler was fitted on arrays
-        prob = tremor_model.predict_proba(features_df.values)[0][1]
-        prediction = int(tremor_model.predict(features_df.values)[0])
+        prob = model.predict_proba(features_df.values)[0][1]
+        prediction = int(model.predict(features_df.values)[0])
 
         return {
             "score": calibrate_score(prob),
@@ -337,7 +358,8 @@ async def predict_tremor(data: TremorData):
 
 @app.post("/predict/gait")
 async def predict_gait(email: str, file: UploadFile = File(...)):
-    if gait_model is None or gait_feature_names is None:
+    model, feature_names = get_gait_model()
+    if model is None or feature_names is None:
         raise HTTPException(status_code=500, detail="Gait model not loaded on server")
 
     # 1. Save temp file
@@ -356,8 +378,8 @@ async def predict_gait(email: str, file: UploadFile = File(...)):
         features_df = pd.DataFrame([features], columns=gait_feature_names)
         
         # Use .values to avoid UserWarning
-        prob = gait_model.predict_proba(features_df.values)[0][1]
-        prediction = int(gait_model.predict(features_df.values)[0])
+        prob = model.predict_proba(features_df.values)[0][1]
+        prediction = int(model.predict(features_df.values)[0])
 
         return {
             "score": calibrate_score(prob),
@@ -500,7 +522,8 @@ async def get_session_history(email: str, limit: int = 10, offset: int = 0):
 
 @app.post("/predict")
 async def predict(data: dict):
-    if ensemble_model is None:
+    model = get_ensemble_model()
+    if model is None:
         raise HTTPException(status_code=500, detail="Ensemble meta-model not loaded on server")
 
     # 1. Collect scores from the 4 tests
@@ -515,7 +538,7 @@ async def predict(data: dict):
     
     try:
         # Get decision function (log-odds)
-        decision = ensemble_model.decision_function(scores_input)[0]
+        decision = model.decision_function(scores_input)[0]
         # Offset removed to prevent moderate scores from being pushed to 0%
         risk_prob = 1 / (1 + np.exp(-decision))
         
@@ -591,6 +614,10 @@ async def predict(data: dict):
             "gait_features": data.get('gait_features')
         }
     }
+
+# ── CHAT HISTORY ENDPOINTS ──────────────────────────────
+
+
 
 if __name__ == "__main__":
     import uvicorn
